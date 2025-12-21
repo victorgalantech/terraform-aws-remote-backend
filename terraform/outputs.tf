@@ -36,7 +36,7 @@ output "backend_config" {
 
 output "backend_config_example" {
   description = "Example backend configuration block for other projects"
-  value = <<-EOT
+  value       = <<-EOT
     terraform {
       backend "s3" {
         bucket         = "${aws_s3_bucket.terraform_state.id}"

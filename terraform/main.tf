@@ -1,6 +1,6 @@
 terraform {
   required_version = ">= 1.6.0"
-  
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
@@ -40,9 +40,9 @@ resource "aws_s3_bucket" "terraform_state" {
   tags = merge(
     local.common_tags,
     {
-      Name        = local.bucket_name
-      Purpose     = "Terraform State Storage"
-      ManagedBy   = "Terraform"
+      Name      = local.bucket_name
+      Purpose   = "Terraform State Storage"
+      ManagedBy = "Terraform"
     }
   )
 }
@@ -144,10 +144,10 @@ resource "aws_s3_bucket_policy" "terraform_state_policy" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid    = "EnforcedTLS"
-        Effect = "Deny"
+        Sid       = "EnforcedTLS"
+        Effect    = "Deny"
         Principal = "*"
-        Action = "s3:*"
+        Action    = "s3:*"
         Resource = [
           aws_s3_bucket.terraform_state.arn,
           "${aws_s3_bucket.terraform_state.arn}/*"
