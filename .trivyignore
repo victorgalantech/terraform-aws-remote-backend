@@ -1,0 +1,22 @@
+# Trivy Ignore File for Terraform State Bucket
+# These findings are acceptable for a Terraform state bucket use case
+
+# CKV_AWS_144: Cross-region replication not required for state bucket
+# Reason: State buckets are regional by design. Versioning provides sufficient protection.
+CKV_AWS_144
+
+# CKV2_AWS_62: S3 event notifications not required
+# Reason: State bucket doesn't need event notifications for its purpose
+CKV2_AWS_62
+
+# CKV_AWS_18: Access logging not required for state bucket
+# Reason: CloudTrail provides sufficient audit trail for state bucket access
+CKV_AWS_18
+
+# CKV_AWS_145: KMS encryption not required (AES256 is sufficient)
+# Reason: AES256 SSE-S3 encryption is sufficient for state files. KMS adds cost without significant benefit.
+CKV_AWS_145
+
+# CKV_AWS_119: DynamoDB KMS encryption not required
+# Reason: DynamoDB table only stores lock IDs (non-sensitive data). Default encryption is sufficient.
+CKV_AWS_119
