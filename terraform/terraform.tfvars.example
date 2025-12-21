@@ -1,0 +1,45 @@
+# Copy this file to terraform.tfvars and customize the values
+# The environment variable is automatically set by CI/CD based on branch:
+# - feature/* or develop -> dev
+# - release/* -> qa
+# - main -> pro
+
+# REQUIRED: Set the environment (dev, qa, or pro)
+environment = "dev"
+
+# AWS Configuration
+aws_region = "eu-west-1"
+
+# S3 Bucket Name (optional - will be auto-generated if not provided)
+# If not set, bucket name will be: victorgalantech-tfstate-{environment}
+# Uncomment and customize if you want a specific name:
+# bucket_name = "my-custom-tfstate-bucket-dev"
+
+# DynamoDB Table for State Locking
+dynamodb_table_name = "terraform-state-locks"
+
+# Lifecycle Configuration
+noncurrent_version_expiration_days = 90
+
+# Common Tags
+tags = {
+  Project     = "Terraform-State-Management"
+  ManagedBy   = "Terraform"
+  Owner       = "Victor"
+}
+
+# ============================================
+# Environment-Specific Examples
+# ============================================
+
+# DEV Environment (feature/* and develop branches)
+# environment = "dev"
+# Bucket will be: victorgalantech-tfstate-dev
+
+# QA Environment (release/* branches)
+# environment = "qa"
+# Bucket will be: victorgalantech-tfstate-qa
+
+# PRODUCTION Environment (main branch)
+# environment = "pro"
+# Bucket will be: victorgalantech-tfstate-pro
