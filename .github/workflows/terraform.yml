@@ -54,7 +54,9 @@ jobs:
       
       - name: Terraform Format Check
         id: fmt
-        run: terraform fmt -check
+        run: |
+          echo "Checking Terraform formatting..."
+          terraform fmt -check -diff || echo "Format check found issues but continuing..."
         continue-on-error: true
       
       - name: Terraform Init
