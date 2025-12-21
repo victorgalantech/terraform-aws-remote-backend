@@ -116,6 +116,11 @@ resource "aws_dynamodb_table" "terraform_locks" {
     type = "S"
   }
 
+  # Enable point-in-time recovery for backup
+  point_in_time_recovery {
+    enabled = true
+  }
+
   # Prevent accidental deletion
   lifecycle {
     prevent_destroy = true
