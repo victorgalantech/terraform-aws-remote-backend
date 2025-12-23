@@ -14,15 +14,14 @@ variable "environment" {
 }
 
 variable "bucket_name" {
-  description = "Name of the S3 bucket for Terraform state (must be globally unique). If not provided, will be generated as victorgalantech-tfstate-{environment}"
+  description = "Name of the S3 bucket for Terraform state (must be globally unique). Must be provided via GitHub Variables as TERRAFORM_STATE_BUCKET_NAME."
   type        = string
-  default     = ""
 }
 
 variable "dynamodb_table_name" {
-  description = "Name of the DynamoDB table for state locking"
+  description = "Name of the DynamoDB table for state locking. If not provided, will be generated as terraform-state-locks-{environment}"
   type        = string
-  default     = "terraform-state-locks"
+  default     = ""
 }
 
 variable "noncurrent_version_expiration_days" {

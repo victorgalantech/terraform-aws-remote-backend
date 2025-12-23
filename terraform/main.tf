@@ -19,7 +19,8 @@ data "aws_region" "current" {}
 
 # Local values
 locals {
-  bucket_name = var.bucket_name != "" ? var.bucket_name : "victorgalantech-tfstate-${var.environment}"
+  bucket_name = var.bucket_name
+  table_name  = var.dynamodb_table_name != "" ? var.dynamodb_table_name : "terraform-state-locks-${var.environment}"
   common_tags = merge(
     var.tags,
     {
@@ -107,7 +108,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "state_lifecycle" {
 
 # 6. DynamoDB Table for State Locking (Prevents concurrent modifications)
 resource "aws_dynamodb_table" "terraform_locks" {
-  name         = var.dynamodb_table_name
+  name         = local.table_name
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "LockID"
 
@@ -129,7 +130,7 @@ resource "aws_dynamodb_table" "terraform_locks" {
   tags = merge(
     local.common_tags,
     {
-      Name      = var.dynamodb_table_name
+      Name      = local.table_name
       Purpose   = "Terraform State Locking"
       ManagedBy = "Terraform"
     }

@@ -1,5 +1,22 @@
 name: Terraform State Bucket CI/CD
 
+# This workflow deploys the S3 bucket and DynamoDB table for Terraform state management.
+#
+# Required GitHub Variables (configure in Settings > Secrets and variables > Actions > Variables):
+# - TERRAFORM_STATE_BUCKET_NAME: Base S3 bucket name (environment suffix added automatically)
+#
+# Optional GitHub Variables:
+# - DYNAMODB_TABLE_NAME: Override default table name (default: terraform-state-locks-{environment})
+# - AWS_REGION: Override default region (default: eu-west-1)
+#
+# Example configuration:
+# - TERRAFORM_STATE_BUCKET_NAME=victorgalantech-tfstate
+#   Results in:
+#     - dev: victorgalantech-tfstate-dev
+#     - qa: victorgalantech-tfstate-qa
+#     - pro: victorgalantech-tfstate-pro
+# - DYNAMODB_TABLE_NAME=my-company-locks (optional, will get -dev/-qa/-pro suffix)
+
 on:
   push:
     branches:
@@ -61,35 +78,6 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
-
-      - name: Check if Backend Already Exists
-        id: backend
-        run: |
-          ENVIRONMENT="${{ steps.env.outputs.environment }}"
-          AWS_REGION="${{ vars.AWS_REGION || env.AWS_REGION }}"
-          BUCKET="victorgalantech-tfstate-${ENVIRONMENT}"
-          TABLE="terraform-state-locks"
-
-          echo "bucket=${BUCKET}" >> $GITHUB_OUTPUT
-          echo "table=${TABLE}" >> $GITHUB_OUTPUT
-
-          bucket_exists=false
-          if aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
-            bucket_exists=true
-          fi
-
-          table_exists=false
-          if aws dynamodb describe-table --table-name "${TABLE}" --region "${AWS_REGION}" >/dev/null 2>&1; then
-            table_exists=true
-          fi
-
-          if [ "${bucket_exists}" = "true" ] && [ "${table_exists}" = "true" ]; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Backend already exists (bucket + table). Skipping Terraform plan."
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Backend does not exist yet. Terraform will plan/apply to create it."
-          fi
       
       - name: Terraform Format Check
         id: fmt
@@ -100,32 +88,49 @@ jobs:
       
       - name: Terraform Init
         id: init
-        if: steps.backend.outputs.exists != 'true'
         run: terraform init
       
       - name: Terraform Validate
         id: validate
-        if: steps.backend.outputs.exists != 'true'
         run: terraform validate -no-color
       
       - name: Terraform Plan
         id: plan
-        if: steps.backend.outputs.exists != 'true'
         run: |
-          terraform plan -no-color -input=false \
-            -var="environment=${{ steps.env.outputs.environment }}" \
-            -out=tfplan
+          ENVIRONMENT="${{ steps.env.outputs.environment }}"
+          PLAN_ARGS="-var=environment=${ENVIRONMENT}"
+          
+          # Required: Base bucket name from GitHub Variables
+          if [ -z "${{ vars.TERRAFORM_STATE_BUCKET_NAME }}" ]; then
+            echo "ERROR: TERRAFORM_STATE_BUCKET_NAME variable is required but not set in GitHub Variables"
+            echo "Go to Settings > Secrets and variables > Actions > Variables and add TERRAFORM_STATE_BUCKET_NAME"
+            echo "Example: victorgalantech-tfstate (environment suffix will be added automatically)"
+            exit 1
+          fi
+          
+          # Construct full bucket name with environment suffix
+          BUCKET_NAME="${{ vars.TERRAFORM_STATE_BUCKET_NAME }}-${ENVIRONMENT}"
+          echo "Using bucket: ${BUCKET_NAME}"
+          PLAN_ARGS="${PLAN_ARGS} -var=bucket_name=${BUCKET_NAME}"
+          
+          # Optional: Override DynamoDB table name via GitHub Variables
+          if [ -n "${{ vars.DYNAMODB_TABLE_NAME }}" ]; then
+            TABLE_NAME="${{ vars.DYNAMODB_TABLE_NAME }}-${ENVIRONMENT}"
+            echo "Using DynamoDB table: ${TABLE_NAME}"
+            PLAN_ARGS="${PLAN_ARGS} -var=dynamodb_table_name=${TABLE_NAME}"
+          fi
+          
+          terraform plan -no-color -input=false ${PLAN_ARGS} -out=tfplan
         continue-on-error: false
       
       - name: Upload Terraform Plan
-        if: steps.backend.outputs.exists != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan
           path: terraform/tfplan
       
       - name: Comment PR with Plan
-        if: github.event_name == 'pull_request' && steps.backend.outputs.exists != 'true'
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
@@ -198,42 +203,11 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
-
-      - name: Check if Backend Already Exists
-        id: backend
-        run: |
-          ENVIRONMENT="${{ steps.env.outputs.environment }}"
-          AWS_REGION="${{ vars.AWS_REGION || env.AWS_REGION }}"
-          BUCKET="victorgalantech-tfstate-${ENVIRONMENT}"
-          TABLE="terraform-state-locks"
-
-          echo "bucket=${BUCKET}" >> $GITHUB_OUTPUT
-          echo "table=${TABLE}" >> $GITHUB_OUTPUT
-
-          bucket_exists=false
-          if aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
-            bucket_exists=true
-          fi
-
-          table_exists=false
-          if aws dynamodb describe-table --table-name "${TABLE}" --region "${AWS_REGION}" >/dev/null 2>&1; then
-            table_exists=true
-          fi
-
-          if [ "${bucket_exists}" = "true" ] && [ "${table_exists}" = "true" ]; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Backend already exists (bucket + table). Skipping Terraform apply."
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
-            echo "Backend does not exist yet. Terraform will apply to create it."
-          fi
       
       - name: Terraform Init
-        if: steps.backend.outputs.exists != 'true'
         run: terraform init
       
       - name: Download Terraform Plan
-        if: steps.backend.outputs.exists != 'true'
         uses: actions/download-artifact@v4
         with:
           name: terraform-plan
@@ -241,66 +215,17 @@ jobs:
       
       - name: Terraform Apply
         id: apply
-        if: steps.backend.outputs.exists != 'true'
-        run: |
-          set -o pipefail
-          terraform apply -auto-approve -input=false tfplan 2>&1 | tee tf_apply.log
-          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
-          if grep -Eiq "(ResourceInUseException: Table already exists|Table already exists|BucketAlreadyOwnedByYou|BucketAlreadyExists)" tf_apply.log; then
-            echo "already_exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "already_exists=false" >> $GITHUB_OUTPUT
-          fi
-        continue-on-error: true
-
-      - name: Evaluate Apply Result
-        if: steps.backend.outputs.exists != 'true' && steps.apply.outputs.exit_code != '0'
-        run: |
-          echo "Terraform apply failed with exit code: ${{ steps.apply.outputs.exit_code }}"
-          if [ "${{ steps.apply.outputs.already_exists }}" = "true" ]; then
-            echo "Detected 'already exists' error. Treating as successful bootstrap run."
-            exit 0
-          else
-            echo "Terraform apply failed for a reason other than 'already exists'. Failing job."
-            exit 1
-          fi
+        run: terraform apply -auto-approve -input=false tfplan
       
       - name: Terraform Output
         id: output
-        if: steps.backend.outputs.exists != 'true' && steps.apply.outputs.exit_code == '0'
         run: |
           echo "s3_bucket_id=$(terraform output -raw s3_bucket_id)" >> $GITHUB_OUTPUT
           echo "dynamodb_table_name=$(terraform output -raw dynamodb_table_name)" >> $GITHUB_OUTPUT
-
-      - name: Display Backend Configuration (Already Exists)
-        if: steps.backend.outputs.exists == 'true'
-        run: |
-          ENVIRONMENT="${{ steps.env.outputs.environment }}"
-          AWS_REGION="${{ vars.AWS_REGION || env.AWS_REGION }}"
-          BUCKET="${{ steps.backend.outputs.bucket }}"
-          TABLE="${{ steps.backend.outputs.table }}"
-
-          echo "## 🎉 Terraform State Backend Already Exists"
-          echo ""
-          echo "### Environment: ${ENVIRONMENT}"
-          echo "### S3 Bucket: ${BUCKET}"
-          echo "### DynamoDB Table: ${TABLE}"
-          echo ""
-          echo "### Use this backend configuration in your projects:"
-          echo "terraform {"
-          echo "  backend \"s3\" {"
-          echo "    bucket         = \"${BUCKET}\""
-          echo "    key            = \"your-project/terraform.tfstate\""
-          echo "    region         = \"${AWS_REGION}\""
-          echo "    dynamodb_table = \"${TABLE}\""
-          echo "    encrypt        = true"
-          echo "  }"
-          echo "}"
       
       - name: Display Backend Configuration
-        if: steps.backend.outputs.exists != 'true' && steps.apply.outputs.exit_code == '0'
         run: |
-          echo "## 🎉 Terraform State Backend Created Successfully!"
+          echo "## 🎉 Terraform State Backend Deployed Successfully!"
           echo ""
           echo "### Environment: ${{ steps.env.outputs.environment }}"
           echo "### S3 Bucket: ${{ steps.output.outputs.s3_bucket_id }}"
