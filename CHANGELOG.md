@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **GitHub Environments integration** for environment-specific secrets:
+  - Separate AWS credentials for dev, qa, and prod
+  - Automatic environment selection based on branch
+  - Protection rules support for production deployments
 - **Environment-based workflow** with branch-to-environment mapping:
   - `feature/*` and `develop` → dev environment
   - `release/*` → qa environment
@@ -17,11 +21,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic environment detection in CI/CD pipeline
 - Environment-specific tags on all resources
 - Organized Terraform files into `terraform/` folder
+- DynamoDB point-in-time recovery for backup protection
+- Comprehensive setup guide (GITHUB_ENVIRONMENTS_SETUP.md)
 
 ### Changed
-- Updated CI/CD workflow to support multiple environments
+- Updated CI/CD workflow to use GitHub Environments
+- Secrets now environment-specific instead of repository-wide
 - Modified variables to include required `environment` parameter
-- Enhanced README with environment workflow documentation
+- Enhanced README with environment workflow and setup documentation
+- Improved Terraform formatting alignment
+
+### Security
+- Added `.trivyignore` with documented security exceptions
+- Configured Checkov to skip acceptable findings
+- All security decisions documented and justified
 
 ## [1.0.0] - 2025-12-21
 

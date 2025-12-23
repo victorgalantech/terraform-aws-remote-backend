@@ -240,12 +240,24 @@ The GitHub Actions workflow automatically:
    - Applies Terraform changes
    - Outputs backend configuration
 
-### Required GitHub Secrets
+### Required GitHub Environments
 
-Add these secrets to your repository:
+This project uses **GitHub Environments** for environment-specific secrets:
 
-- `AWS_ACCESS_KEY_ID` - AWS access key
-- `AWS_SECRET_ACCESS_KEY` - AWS secret key
+| Environment | Branches | Secrets Required |
+|------------|----------|------------------|
+| `dev` | `feature/*`, `develop` | AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION (optional) |
+| `qa` | `release/*` | AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION (optional) |
+| `prod` | `main` | AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION (optional) |
+
+**📖 See [GITHUB_ENVIRONMENTS_SETUP.md](GITHUB_ENVIRONMENTS_SETUP.md) for detailed setup instructions.**
+
+#### Quick Setup
+1. Go to **Settings** → **Environments**
+2. Create three environments: `dev`, `qa`, `prod`
+3. Add AWS credentials to each environment (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`)
+4. Configure protection rules (especially for `prod`)
+5. **Optional:** Set `AWS_REGION` as an organization variable (defaults to `eu-west-1` if not set)
 
 ## 🔒 Security
 
