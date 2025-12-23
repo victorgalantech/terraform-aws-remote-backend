@@ -61,6 +61,35 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Check if Backend Already Exists
+        id: backend
+        run: |
+          ENVIRONMENT="${{ steps.env.outputs.environment }}"
+          AWS_REGION="${{ vars.AWS_REGION || env.AWS_REGION }}"
+          BUCKET="victorgalantech-tfstate-${ENVIRONMENT}"
+          TABLE="terraform-state-locks"
+
+          echo "bucket=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "table=${TABLE}" >> $GITHUB_OUTPUT
+
+          bucket_exists=false
+          if aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
+            bucket_exists=true
+          fi
+
+          table_exists=false
+          if aws dynamodb describe-table --table-name "${TABLE}" --region "${AWS_REGION}" >/dev/null 2>&1; then
+            table_exists=true
+          fi
+
+          if [ "${bucket_exists}" = "true" ] && [ "${table_exists}" = "true" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Backend already exists (bucket + table). Skipping Terraform plan."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Backend does not exist yet. Terraform will plan/apply to create it."
+          fi
       
       - name: Terraform Format Check
         id: fmt
@@ -71,14 +100,17 @@ jobs:
       
       - name: Terraform Init
         id: init
+        if: steps.backend.outputs.exists != 'true'
         run: terraform init
       
       - name: Terraform Validate
         id: validate
+        if: steps.backend.outputs.exists != 'true'
         run: terraform validate -no-color
       
       - name: Terraform Plan
         id: plan
+        if: steps.backend.outputs.exists != 'true'
         run: |
           terraform plan -no-color -input=false \
             -var="environment=${{ steps.env.outputs.environment }}" \
@@ -86,13 +118,14 @@ jobs:
         continue-on-error: false
       
       - name: Upload Terraform Plan
+        if: steps.backend.outputs.exists != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan
           path: terraform/tfplan
       
       - name: Comment PR with Plan
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.backend.outputs.exists != 'true'
         uses: actions/github-script@v7
         with:
           script: |
@@ -165,11 +198,42 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Check if Backend Already Exists
+        id: backend
+        run: |
+          ENVIRONMENT="${{ steps.env.outputs.environment }}"
+          AWS_REGION="${{ vars.AWS_REGION || env.AWS_REGION }}"
+          BUCKET="victorgalantech-tfstate-${ENVIRONMENT}"
+          TABLE="terraform-state-locks"
+
+          echo "bucket=${BUCKET}" >> $GITHUB_OUTPUT
+          echo "table=${TABLE}" >> $GITHUB_OUTPUT
+
+          bucket_exists=false
+          if aws s3api head-bucket --bucket "${BUCKET}" 2>/dev/null; then
+            bucket_exists=true
+          fi
+
+          table_exists=false
+          if aws dynamodb describe-table --table-name "${TABLE}" --region "${AWS_REGION}" >/dev/null 2>&1; then
+            table_exists=true
+          fi
+
+          if [ "${bucket_exists}" = "true" ] && [ "${table_exists}" = "true" ]; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Backend already exists (bucket + table). Skipping Terraform apply."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "Backend does not exist yet. Terraform will apply to create it."
+          fi
       
       - name: Terraform Init
+        if: steps.backend.outputs.exists != 'true'
         run: terraform init
       
       - name: Download Terraform Plan
+        if: steps.backend.outputs.exists != 'true'
         uses: actions/download-artifact@v4
         with:
           name: terraform-plan
@@ -177,6 +241,7 @@ jobs:
       
       - name: Terraform Apply
         id: apply
+        if: steps.backend.outputs.exists != 'true'
         run: |
           set -o pipefail
           terraform apply -auto-approve -input=false tfplan 2>&1 | tee tf_apply.log
@@ -189,7 +254,7 @@ jobs:
         continue-on-error: true
 
       - name: Evaluate Apply Result
-        if: steps.apply.outputs.exit_code != '0'
+        if: steps.backend.outputs.exists != 'true' && steps.apply.outputs.exit_code != '0'
         run: |
           echo "Terraform apply failed with exit code: ${{ steps.apply.outputs.exit_code }}"
           if [ "${{ steps.apply.outputs.already_exists }}" = "true" ]; then
@@ -202,18 +267,18 @@ jobs:
       
       - name: Terraform Output
         id: output
-        if: steps.apply.outputs.exit_code == '0'
+        if: steps.backend.outputs.exists != 'true' && steps.apply.outputs.exit_code == '0'
         run: |
           echo "s3_bucket_id=$(terraform output -raw s3_bucket_id)" >> $GITHUB_OUTPUT
           echo "dynamodb_table_name=$(terraform output -raw dynamodb_table_name)" >> $GITHUB_OUTPUT
 
-      - name: Display Backend Configuration (Existing Infra)
-        if: steps.apply.outputs.exit_code != '0' && steps.apply.outputs.already_exists == 'true'
+      - name: Display Backend Configuration (Already Exists)
+        if: steps.backend.outputs.exists == 'true'
         run: |
           ENVIRONMENT="${{ steps.env.outputs.environment }}"
           AWS_REGION="${{ vars.AWS_REGION || env.AWS_REGION }}"
-          BUCKET="victorgalantech-tfstate-${ENVIRONMENT}"
-          TABLE="terraform-state-locks"
+          BUCKET="${{ steps.backend.outputs.bucket }}"
+          TABLE="${{ steps.backend.outputs.table }}"
 
           echo "## 🎉 Terraform State Backend Already Exists"
           echo ""
@@ -233,7 +298,7 @@ jobs:
           echo "}"
       
       - name: Display Backend Configuration
-        if: steps.apply.outputs.exit_code == '0'
+        if: steps.backend.outputs.exists != 'true' && steps.apply.outputs.exit_code == '0'
         run: |
           echo "## 🎉 Terraform State Backend Created Successfully!"
           echo ""
