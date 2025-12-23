@@ -1,0 +1,50 @@
+# Copy this file to terraform.tfvars and customize the values
+# The environment variable is automatically set by CI/CD based on branch:
+# - feature/* or develop -> dev
+# - release/* -> qa
+# - main -> pro
+
+# REQUIRED: Set the environment (dev, qa, or pro)
+environment = "dev"
+
+# AWS Configuration
+aws_region = "eu-west-1"
+
+# S3 Bucket Name (REQUIRED)
+# For GitHub Actions: Set TF_STATE_BUCKET_NAME to base name only (e.g., "victorgalantech-tfstate")
+#                     The workflow will automatically add environment suffix (-dev, -qa, -pro)
+# For local runs: Use full name with environment suffix
+# This must be globally unique across all AWS accounts
+bucket_name = "victorgalantech-tfstate-dev"
+
+# DynamoDB Table for State Locking (REQUIRED)
+# For GitHub Actions: Set TF_LOCK_DYNAMODB_TABLE_NAME to base name only (e.g., "terraform-state-locks")
+#                     The workflow will automatically add environment suffix (-dev, -qa, -pro)
+# For local runs: Use full name with environment suffix
+TF_LOCK_DYNAMODB_TABLE_NAME = "terraform-state-locks-dev"
+
+# Lifecycle Configuration
+noncurrent_version_expiration_days = 90
+
+# Common Tags
+tags = {
+  Project     = "Terraform-State-Management"
+  ManagedBy   = "Terraform"
+  Owner       = "Victor"
+}
+
+# ============================================
+# Environment-Specific Examples
+# ============================================
+
+# DEV Environment (feature/* and develop branches)
+# environment = "dev"
+# Bucket will be: victorgalantech-tfstate-dev
+
+# QA Environment (release/* branches)
+# environment = "qa"
+# Bucket will be: victorgalantech-tfstate-qa
+
+# PRODUCTION Environment (main branch)
+# environment = "pro"
+# Bucket will be: victorgalantech-tfstate-pro

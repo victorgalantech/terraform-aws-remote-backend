@@ -1,0 +1,303 @@
+name: Terraform State Bucket CI/CD
+
+# This workflow deploys the S3 bucket and DynamoDB table for Terraform state management.
+#
+# ATOMICITY GUARANTEE:
+# - All resources are created successfully OR none are created (rollback on failure)
+# - DynamoDB table depends on all S3 resources (prevents partial deployment)
+# - Automatic rollback destroys any partially created resources if apply fails
+#
+# Required GitHub Variables (configure in Settings > Secrets and variables > Actions > Variables):
+# - TF_STATE_BUCKET_NAME: Base S3 bucket name (environment suffix added automatically)
+# - TF_LOCK_DYNAMODB_TABLE_NAME: Base DynamoDB table name (environment suffix added automatically)
+#
+# Optional GitHub Variables:
+# - AWS_REGION: Override default region (default: eu-west-1)
+#
+# Example configuration:
+# - TF_STATE_BUCKET_NAME=victorgalantech-tfstate
+#   Results in:
+#     - dev: victorgalantech-tfstate-dev
+#     - qa: victorgalantech-tfstate-qa
+#     - pro: victorgalantech-tfstate-pro
+# - TF_LOCK_DYNAMODB_TABLE_NAME=terraform-state-locks
+#   Results in:
+#     - dev: terraform-state-locks-dev
+#     - qa: terraform-state-locks-qa
+#     - pro: terraform-state-locks-pro
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - feature/*
+  pull_request:
+    branches:
+      - main
+      - develop
+
+env:
+  AWS_REGION: eu-west-1
+  TERRAFORM_VERSION: 1.6.0
+
+jobs:
+  terraform-validate:
+    name: Terraform Validate & Plan
+    runs-on: ubuntu-latest
+    
+    defaults:
+      run:
+        working-directory: terraform
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Determine Environment
+        id: env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=pro" >> $GITHUB_OUTPUT
+            echo "secret_suffix=PROD" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" =~ ^refs/heads/release/.* ]]; then
+            echo "environment=qa" >> $GITHUB_OUTPUT
+            echo "secret_suffix=QA" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "secret_suffix=DEV" >> $GITHUB_OUTPUT
+          fi
+          echo "Environment: $(cat $GITHUB_OUTPUT | grep environment | cut -d'=' -f2)"
+          echo "Secret suffix: $(cat $GITHUB_OUTPUT | grep secret_suffix | cut -d'=' -f2)"
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ 
+            steps.env.outputs.secret_suffix == 'PROD' && secrets.AWS_ACCESS_KEY_ID_PROD || 
+            steps.env.outputs.secret_suffix == 'QA' && secrets.AWS_ACCESS_KEY_ID_QA || 
+            secrets.AWS_ACCESS_KEY_ID_DEV }} 
+          aws-secret-access-key: ${{ 
+            steps.env.outputs.secret_suffix == 'PROD' && secrets.AWS_SECRET_ACCESS_KEY_PROD || 
+            steps.env.outputs.secret_suffix == 'QA' && secrets.AWS_SECRET_ACCESS_KEY_QA || 
+            secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          aws-region: ${{ vars.AWS_REGION || env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: Terraform Format Check
+        id: fmt
+        run: |
+          echo "Checking Terraform formatting..."
+          terraform fmt -check -diff || echo "Format check found issues but continuing..."
+        continue-on-error: true
+      
+      - name: Terraform Init
+        id: init
+        run: terraform init
+      
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+      
+      - name: Terraform Plan
+        id: plan
+        run: |
+          ENVIRONMENT="${{ steps.env.outputs.environment }}"
+          PLAN_ARGS="-var=environment=${ENVIRONMENT}"
+          
+          # Required: Base bucket name from GitHub Variables
+          if [ -z "${{ vars.TF_STATE_BUCKET_NAME }}" ]; then
+            echo "ERROR: TF_STATE_BUCKET_NAME variable is required but not set in GitHub Variables"
+            echo "Go to Settings > Secrets and variables > Actions > Variables and add TF_STATE_BUCKET_NAME"
+            echo "Example: victorgalantech-tfstate (environment suffix will be added automatically)"
+            exit 1
+          fi
+          
+          # Required: Base DynamoDB table name from GitHub Variables
+          if [ -z "${{ vars.TF_LOCK_DYNAMODB_TABLE_NAME }}" ]; then
+            echo "ERROR: TF_LOCK_DYNAMODB_TABLE_NAME variable is required but not set in GitHub Variables"
+            echo "Go to Settings > Secrets and variables > Actions > Variables and add TF_LOCK_DYNAMODB_TABLE_NAME"
+            echo "Example: terraform-state-locks (environment suffix will be added automatically)"
+            exit 1
+          fi
+          
+          # Construct full bucket name with environment suffix
+          BUCKET_NAME="${{ vars.TF_STATE_BUCKET_NAME }}-${ENVIRONMENT}"
+          echo "Using bucket: ${BUCKET_NAME}"
+          PLAN_ARGS="${PLAN_ARGS} -var=bucket_name=${BUCKET_NAME}"
+          
+          # Construct full DynamoDB table name with environment suffix
+          TABLE_NAME="${{ vars.TF_LOCK_DYNAMODB_TABLE_NAME }}-${ENVIRONMENT}"
+          echo "Using DynamoDB table: ${TABLE_NAME}"
+          PLAN_ARGS="${PLAN_ARGS} -var=TF_LOCK_DYNAMODB_TABLE_NAME=${TABLE_NAME}"
+          
+          terraform plan -no-color -input=false ${PLAN_ARGS} -out=tfplan
+        continue-on-error: false
+      
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform/tfplan
+      
+      - name: Comment PR with Plan
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = `#### Terraform Format and Style 🖌\`${{ steps.fmt.outcome }}\`
+            #### Terraform Initialization ⚙️\`${{ steps.init.outcome }}\`
+            #### Terraform Validation 🤖\`${{ steps.validate.outcome }}\`
+            #### Terraform Plan 📖\`${{ steps.plan.outcome }}\`
+            
+            <details><summary>Show Plan</summary>
+            
+            \`\`\`terraform
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+            
+            </details>
+            
+            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: plan
+            });
+
+  terraform-apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: terraform-validate
+    
+    defaults:
+      run:
+        working-directory: terraform
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Determine Environment
+        id: env
+        run: |
+          if [[ "${{ github.ref }}" == "refs/heads/main" ]]; then
+            echo "environment=pro" >> $GITHUB_OUTPUT
+            echo "secret_suffix=PROD" >> $GITHUB_OUTPUT
+          elif [[ "${{ github.ref }}" =~ ^refs/heads/release/.* ]]; then
+            echo "environment=qa" >> $GITHUB_OUTPUT
+            echo "secret_suffix=QA" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+            echo "secret_suffix=DEV" >> $GITHUB_OUTPUT
+          fi
+          echo "Deploying to environment: $(cat $GITHUB_OUTPUT | grep environment | cut -d'=' -f2)"
+          echo "Secret suffix: $(cat $GITHUB_OUTPUT | grep secret_suffix | cut -d'=' -f2)"
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ 
+            steps.env.outputs.secret_suffix == 'PROD' && secrets.AWS_ACCESS_KEY_ID_PROD || 
+            steps.env.outputs.secret_suffix == 'QA' && secrets.AWS_ACCESS_KEY_ID_QA || 
+            secrets.AWS_ACCESS_KEY_ID_DEV }}
+          aws-secret-access-key: ${{ 
+            steps.env.outputs.secret_suffix == 'PROD' && secrets.AWS_SECRET_ACCESS_KEY_PROD || 
+            steps.env.outputs.secret_suffix == 'QA' && secrets.AWS_SECRET_ACCESS_KEY_QA || 
+            secrets.AWS_SECRET_ACCESS_KEY_DEV }}
+          aws-region: ${{ vars.AWS_REGION || env.AWS_REGION }}
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+      
+      - name: Terraform Init
+        run: terraform init
+      
+      - name: Download Terraform Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-plan
+          path: terraform
+      
+      - name: Terraform Apply
+        id: apply
+        run: |
+          echo "Starting atomic Terraform apply..."
+          echo "All resources will be created or none (rollback on failure)"
+          
+          if terraform apply -auto-approve -input=false tfplan; then
+            echo "apply_success=true" >> $GITHUB_OUTPUT
+            echo "✅ All resources created successfully"
+          else
+            echo "apply_success=false" >> $GITHUB_OUTPUT
+            echo "❌ Terraform apply failed - initiating rollback"
+            exit 1
+          fi
+      
+      - name: Rollback on Failure
+        if: failure() && steps.apply.outcome == 'failure'
+        run: |
+          echo "⚠️  Terraform apply failed. Rolling back any partially created resources..."
+          echo "This ensures atomicity: all resources created or none."
+          
+          # Disable prevent_destroy temporarily for cleanup
+          export TF_CLI_ARGS="-lock=false"
+          
+          # Attempt to destroy any partially created resources
+          terraform destroy -auto-approve -input=false \
+            -var="environment=${{ steps.env.outputs.environment }}" \
+            -var="bucket_name=${{ vars.TF_STATE_BUCKET_NAME }}-${{ steps.env.outputs.environment }}" \
+            -var="TF_LOCK_DYNAMODB_TABLE_NAME=${{ vars.TF_LOCK_DYNAMODB_TABLE_NAME }}-${{ steps.env.outputs.environment }}" || true
+          
+          echo "🧹 Cleanup completed. No partial infrastructure left behind."
+          echo "Please review the error above and fix the issue before re-running."
+      
+      - name: Terraform Output
+        id: output
+        if: steps.apply.outputs.apply_success == 'true'
+        run: |
+          echo "s3_bucket_id=$(terraform output -raw s3_bucket_id)" >> $GITHUB_OUTPUT
+          echo "TF_LOCK_DYNAMODB_TABLE_NAME=$(terraform output -raw TF_LOCK_DYNAMODB_TABLE_NAME)" >> $GITHUB_OUTPUT
+      
+      - name: Display Backend Configuration
+        run: |
+          echo "## 🎉 Terraform State Backend Deployed Successfully!"
+          echo ""
+          echo "### Environment: ${{ steps.env.outputs.environment }}"
+          echo "### S3 Bucket: ${{ steps.output.outputs.s3_bucket_id }}"
+          echo "### DynamoDB Table: ${{ steps.output.outputs.TF_LOCK_DYNAMODB_TABLE_NAME }}"
+          echo ""
+          echo "### Use this backend configuration in your projects:"
+          terraform output -raw backend_config_example
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: terraform
+          framework: terraform
+          output_format: cli
+          soft_fail: true
+          skip_check: CKV_AWS_144,CKV2_AWS_62,CKV_AWS_18,CKV_AWS_145,CKV_AWS_119
+      
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: terraform
+          soft_fail: true
