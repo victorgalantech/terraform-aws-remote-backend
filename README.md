@@ -111,6 +111,49 @@ Each environment gets its own:
 
 ## 🚀 Quick Start
 
+### Option A: Using Automation Scripts (Recommended for Local Development)
+
+The easiest way to run Terraform locally for **dev** and **qa** environments:
+
+#### Windows (PowerShell)
+
+```powershell
+# Deploy DEV environment
+.\scripts\local\terraform\apply-dev.ps1
+
+# Deploy QA environment
+.\scripts\local\terraform\apply-qa.ps1
+
+# Destroy DEV environment
+.\scripts\local\terraform\destroy-dev.ps1
+
+# Destroy QA environment
+.\scripts\local\terraform\destroy-qa.ps1
+```
+
+#### Linux/macOS (Bash)
+
+```bash
+# Make scripts executable (first time only)
+chmod +x scripts/local/terraform/*.sh
+
+# Deploy DEV environment
+./scripts/local/terraform/apply-dev.sh
+
+# Deploy QA environment
+./scripts/local/terraform/apply-qa.sh
+
+# Destroy DEV environment
+./scripts/local/terraform/destroy-dev.sh
+
+# Destroy QA environment
+./scripts/local/terraform/destroy-qa.sh
+```
+
+**Note:** Production environment should only be deployed via CI/CD pipeline for safety.
+
+### Option B: Manual Terraform Commands
+
 ### 1. Clone the Repository
 
 ```bash

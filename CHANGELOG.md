@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Local execution scripts** for dev and qa environments:
+  - PowerShell scripts for Windows (`apply-dev.ps1`, `apply-qa.ps1`, `destroy-dev.ps1`, `destroy-qa.ps1`)
+  - Bash scripts for Linux/macOS (`apply-dev.sh`, `apply-qa.sh`, `destroy-dev.sh`, `destroy-qa.sh`)
+  - Automated workflow: init → validate → plan → apply/destroy
+  - Safety confirmations for all destructive operations
+  - Enhanced destroy scripts requiring exact environment name confirmation
+- **Environment-specific tfvars files**:
+  - `terraform/dev.tfvars` - DEV environment configuration
+  - `terraform/qa.tfvars` - QA environment configuration
+  - Added to gitignore exceptions for version control
+- Scripts documentation (`scripts/README.md`) with usage examples and troubleshooting
 - **GitHub Environments integration** for environment-specific secrets:
   - Separate AWS credentials for dev, qa, and prod
   - Automatic environment selection based on branch
@@ -25,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive setup guide (GITHUB_ENVIRONMENTS_SETUP.md)
 
 ### Changed
+- Updated README with local execution instructions in Quick Start section
+- Updated `.gitignore` to allow dev.tfvars and qa.tfvars (but not prod)
 - Updated CI/CD workflow to use GitHub Environments
 - Secrets now environment-specific instead of repository-wide
 - Modified variables to include required `environment` parameter
@@ -32,6 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved Terraform formatting alignment
 
 ### Security
+- Production environment restricted to CI/CD pipeline only (no local scripts)
+- Destroy scripts require exact confirmation string to prevent accidents
 - Added `.trivyignore` with documented security exceptions
 - Configured Checkov to skip acceptable findings
 - All security decisions documented and justified
