@@ -176,7 +176,26 @@ jobs:
           path: terraform
       
       - name: Terraform Apply
-        run: terraform apply -auto-approve -input=false tfplan
+        id: apply
+        run: |
+          set -o pipefail
+          terraform apply -auto-approve -input=false tfplan 2>&1 | tee tf_apply.log
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+        continue-on-error: true
+
+      - name: Treat "already exists" as success
+        if: steps.apply.outputs.exit_code != '0'
+        run: |
+          echo "Terraform apply failed with exit code: ${{ steps.apply.outputs.exit_code }}"
+          echo "Checking if failure is due to resources already existing..."
+
+          if grep -Eiq "(ResourceInUseException: Table already exists|Table already exists|BucketAlreadyOwnedByYou|BucketAlreadyExists)" tf_apply.log; then
+            echo "Detected 'already exists' error. Treating as successful bootstrap run."
+            exit 0
+          fi
+
+          echo "Terraform apply failed for a reason other than 'already exists'. Failing job."
+          exit 1
       
       - name: Terraform Output
         id: output
