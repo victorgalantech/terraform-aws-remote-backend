@@ -51,28 +51,39 @@ This project implements a **branch-based environment strategy**:
 | `release/*` | **qa** | `terraform-state-locks-qa` | ✅ Yes |
 | `main` | **pro** | `terraform-state-locks-pro` | ✅ Yes |
 
-**Note**: S3 bucket base name must be configured via GitHub Variables as `TERRAFORM_STATE_BUCKET_NAME` (e.g., `victorgalantech-tfstate`). The workflow automatically adds the environment suffix (`-dev`, `-qa`, `-pro`).
+**Note**: Both S3 bucket and DynamoDB table base names must be configured via GitHub Variables:
+- `TF_STATE_BUCKET_NAME` (e.g., `victorgalantech-tfstate`)
+- `TF_LOCK_DYNAMODB_TABLE_NAME` (e.g., `terraform-state-locks`)
+
+The workflow automatically adds environment suffix (`-dev`, `-qa`, `-pro`) to both.
 
 ### How It Works
 
-1. **Configure GitHub Variable** `TERRAFORM_STATE_BUCKET_NAME` with base name (e.g., `victorgalantech-tfstate`)
-2. **Create a feature branch** → Automatically uses `dev` environment → Bucket: `victorgalantech-tfstate-dev`
-3. **Merge to develop** → Deploys to `dev` environment
-4. **Create release branch** (`release/v1.0.0`) → Deploys to `qa` environment → Bucket: `victorgalantech-tfstate-qa`
-5. **Merge to main** → Deploys to `pro` environment → Bucket: `victorgalantech-tfstate-pro`
+1. **Configure GitHub Variables** (both required):
+   - `TF_STATE_BUCKET_NAME=victorgalantech-tfstate`
+   - `TF_LOCK_DYNAMODB_TABLE_NAME=terraform-state-locks`
+2. **Create a feature branch** → `dev` environment → `victorgalantech-tfstate-dev` + `terraform-state-locks-dev`
+3. **Merge to develop** → Deploys to `dev`
+4. **Create release branch** → `qa` environment → `victorgalantech-tfstate-qa` + `terraform-state-locks-qa`
+5. **Merge to main** → `pro` environment → `victorgalantech-tfstate-pro` + `terraform-state-locks-pro`
 
 ### Environment Isolation
 
 Each environment gets its own:
-- ✅ Dedicated S3 bucket (base name from `TERRAFORM_STATE_BUCKET_NAME` + environment suffix)
+- ✅ Dedicated S3 bucket (base name from `TF_STATE_BUCKET_NAME` + environment suffix)
 - ✅ Separate state files
-- ✅ Independent DynamoDB lock table per environment (`terraform-state-locks-{env}`)
+- ✅ Independent DynamoDB lock table (base name from `TF_LOCK_DYNAMODB_TABLE_NAME` + environment suffix)
 - ✅ Environment-specific tags
 
-**Example**: Setting `TERRAFORM_STATE_BUCKET_NAME=victorgalantech-tfstate` creates:
-- `victorgalantech-tfstate-dev`
-- `victorgalantech-tfstate-qa`
-- `victorgalantech-tfstate-pro`
+**Example**: Setting base names:
+```
+TF_STATE_BUCKET_NAME=victorgalantech-tfstate
+TF_LOCK_DYNAMODB_TABLE_NAME=terraform-state-locks
+```
+Creates per environment:
+- dev: `victorgalantech-tfstate-dev` + `terraform-state-locks-dev`
+- qa: `victorgalantech-tfstate-qa` + `terraform-state-locks-qa`
+- pro: `victorgalantech-tfstate-pro` + `terraform-state-locks-pro`
 
 ## 🏗️ Architecture
 
@@ -235,7 +246,7 @@ Create a `backend.tf` file in your project:
 ```hcl
 terraform {
   backend "s3" {
-    bucket         = "your-bucket-name-dev"  # From TERRAFORM_STATE_BUCKET_NAME
+    bucket         = "your-bucket-name-dev"  # From TF_STATE_BUCKET_NAME
     key            = "your-project/terraform.tfstate"
     region         = "eu-west-1"
     dynamodb_table = "terraform-state-locks-dev"  # Auto-generated per environment
@@ -274,9 +285,13 @@ terraform init -migrate-state
 | `environment` | Environment name (dev, qa, pro) | - | **Yes** |
 | `aws_region` | AWS region | `eu-west-1` | No |
 | `bucket_name` | S3 bucket name (full name with environment suffix) | None | **Yes** |
-| `dynamodb_table_name` | DynamoDB table name | `terraform-state-locks-{env}` | No |
+| `TF_LOCK_DYNAMODB_TABLE_NAME` | DynamoDB table name (full name with environment suffix) | None | **Yes** |
 
-**GitHub Variable**: `TERRAFORM_STATE_BUCKET_NAME` should contain the **base name only** (e.g., `victorgalantech-tfstate`). The workflow automatically appends `-dev`, `-qa`, or `-pro`.
+**GitHub Variables**: Both are required and should contain **base names only**:
+- `TF_STATE_BUCKET_NAME` (e.g., `victorgalantech-tfstate`)
+- `TF_LOCK_DYNAMODB_TABLE_NAME` (e.g., `terraform-state-locks`)
+
+The workflow automatically appends `-dev`, `-qa`, or `-pro` based on the branch.
 | `noncurrent_version_expiration_days` | Days to retain old versions | `90` | No |
 | `tags` | Common tags for resources | See variables.tf | No |
 
@@ -388,13 +403,13 @@ aws dynamodb describe-table \
 
 ### Error: Bucket Already Exists
 
-The bucket name must be globally unique across all AWS accounts. Update the `TERRAFORM_STATE_BUCKET_NAME` GitHub Variable:
+The bucket name must be globally unique across all AWS accounts. Update the `TF_STATE_BUCKET_NAME` GitHub Variable:
 
 1. Go to **Settings** > **Secrets and variables** > **Actions** > **Variables**
-2. Update `TERRAFORM_STATE_BUCKET_NAME` to a unique **base name** (e.g., `your-company-tfstate`)
+2. Update `TF_STATE_BUCKET_NAME` to a unique **base name** (e.g., `your-company-tfstate`)
 3. Re-run the workflow (environment suffix will be added automatically)
 
-For local runs, update `bucket_name` in your `terraform.tfvars` file with the **full name** including environment suffix (e.g., `your-company-tfstate-dev`).
+For local runs, update `bucket_name` and `TF_LOCK_DYNAMODB_TABLE_NAME` in your `terraform.tfvars` file with the **full names** including environment suffix (e.g., `your-company-tfstate-dev`, `terraform-state-locks-dev`).
 
 ### Error: State Locked
 

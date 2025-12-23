@@ -13,7 +13,7 @@ output "s3_bucket_region" {
   value       = aws_s3_bucket.terraform_state.region
 }
 
-output "dynamodb_table_name" {
+output "TF_LOCK_DYNAMODB_TABLE_NAME" {
   description = "The name of the DynamoDB table for state locking"
   value       = aws_dynamodb_table.terraform_locks.name
 }

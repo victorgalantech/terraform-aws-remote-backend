@@ -20,7 +20,7 @@ data "aws_region" "current" {}
 # Local values
 locals {
   bucket_name = var.bucket_name
-  table_name  = var.dynamodb_table_name != "" ? var.dynamodb_table_name : "terraform-state-locks-${var.environment}"
+  table_name  = var.TF_LOCK_DYNAMODB_TABLE_NAME
   common_tags = merge(
     var.tags,
     {
@@ -126,6 +126,17 @@ resource "aws_dynamodb_table" "terraform_locks" {
   lifecycle {
     prevent_destroy = true
   }
+
+  # Ensure all S3 resources are created successfully before creating DynamoDB
+  # This prevents partial deployment if S3 bucket creation fails
+  depends_on = [
+    aws_s3_bucket.terraform_state,
+    aws_s3_bucket_versioning.versioning,
+    aws_s3_bucket_server_side_encryption_configuration.default,
+    aws_s3_bucket_public_access_block.block_public_access,
+    aws_s3_bucket_lifecycle_configuration.state_lifecycle,
+    aws_s3_bucket_policy.terraform_state_policy
+  ]
 
   tags = merge(
     local.common_tags,

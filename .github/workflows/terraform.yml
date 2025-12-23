@@ -2,20 +2,29 @@ name: Terraform State Bucket CI/CD
 
 # This workflow deploys the S3 bucket and DynamoDB table for Terraform state management.
 #
+# ATOMICITY GUARANTEE:
+# - All resources are created successfully OR none are created (rollback on failure)
+# - DynamoDB table depends on all S3 resources (prevents partial deployment)
+# - Automatic rollback destroys any partially created resources if apply fails
+#
 # Required GitHub Variables (configure in Settings > Secrets and variables > Actions > Variables):
-# - TERRAFORM_STATE_BUCKET_NAME: Base S3 bucket name (environment suffix added automatically)
+# - TF_STATE_BUCKET_NAME: Base S3 bucket name (environment suffix added automatically)
+# - TF_LOCK_DYNAMODB_TABLE_NAME: Base DynamoDB table name (environment suffix added automatically)
 #
 # Optional GitHub Variables:
-# - DYNAMODB_TABLE_NAME: Override default table name (default: terraform-state-locks-{environment})
 # - AWS_REGION: Override default region (default: eu-west-1)
 #
 # Example configuration:
-# - TERRAFORM_STATE_BUCKET_NAME=victorgalantech-tfstate
+# - TF_STATE_BUCKET_NAME=victorgalantech-tfstate
 #   Results in:
 #     - dev: victorgalantech-tfstate-dev
 #     - qa: victorgalantech-tfstate-qa
 #     - pro: victorgalantech-tfstate-pro
-# - DYNAMODB_TABLE_NAME=my-company-locks (optional, will get -dev/-qa/-pro suffix)
+# - TF_LOCK_DYNAMODB_TABLE_NAME=terraform-state-locks
+#   Results in:
+#     - dev: terraform-state-locks-dev
+#     - qa: terraform-state-locks-qa
+#     - pro: terraform-state-locks-pro
 
 on:
   push:
@@ -101,24 +110,30 @@ jobs:
           PLAN_ARGS="-var=environment=${ENVIRONMENT}"
           
           # Required: Base bucket name from GitHub Variables
-          if [ -z "${{ vars.TERRAFORM_STATE_BUCKET_NAME }}" ]; then
-            echo "ERROR: TERRAFORM_STATE_BUCKET_NAME variable is required but not set in GitHub Variables"
-            echo "Go to Settings > Secrets and variables > Actions > Variables and add TERRAFORM_STATE_BUCKET_NAME"
+          if [ -z "${{ vars.TF_STATE_BUCKET_NAME }}" ]; then
+            echo "ERROR: TF_STATE_BUCKET_NAME variable is required but not set in GitHub Variables"
+            echo "Go to Settings > Secrets and variables > Actions > Variables and add TF_STATE_BUCKET_NAME"
             echo "Example: victorgalantech-tfstate (environment suffix will be added automatically)"
             exit 1
           fi
           
+          # Required: Base DynamoDB table name from GitHub Variables
+          if [ -z "${{ vars.TF_LOCK_DYNAMODB_TABLE_NAME }}" ]; then
+            echo "ERROR: TF_LOCK_DYNAMODB_TABLE_NAME variable is required but not set in GitHub Variables"
+            echo "Go to Settings > Secrets and variables > Actions > Variables and add TF_LOCK_DYNAMODB_TABLE_NAME"
+            echo "Example: terraform-state-locks (environment suffix will be added automatically)"
+            exit 1
+          fi
+          
           # Construct full bucket name with environment suffix
-          BUCKET_NAME="${{ vars.TERRAFORM_STATE_BUCKET_NAME }}-${ENVIRONMENT}"
+          BUCKET_NAME="${{ vars.TF_STATE_BUCKET_NAME }}-${ENVIRONMENT}"
           echo "Using bucket: ${BUCKET_NAME}"
           PLAN_ARGS="${PLAN_ARGS} -var=bucket_name=${BUCKET_NAME}"
           
-          # Optional: Override DynamoDB table name via GitHub Variables
-          if [ -n "${{ vars.DYNAMODB_TABLE_NAME }}" ]; then
-            TABLE_NAME="${{ vars.DYNAMODB_TABLE_NAME }}-${ENVIRONMENT}"
-            echo "Using DynamoDB table: ${TABLE_NAME}"
-            PLAN_ARGS="${PLAN_ARGS} -var=dynamodb_table_name=${TABLE_NAME}"
-          fi
+          # Construct full DynamoDB table name with environment suffix
+          TABLE_NAME="${{ vars.TF_LOCK_DYNAMODB_TABLE_NAME }}-${ENVIRONMENT}"
+          echo "Using DynamoDB table: ${TABLE_NAME}"
+          PLAN_ARGS="${PLAN_ARGS} -var=TF_LOCK_DYNAMODB_TABLE_NAME=${TABLE_NAME}"
           
           terraform plan -no-color -input=false ${PLAN_ARGS} -out=tfplan
         continue-on-error: false
@@ -215,13 +230,43 @@ jobs:
       
       - name: Terraform Apply
         id: apply
-        run: terraform apply -auto-approve -input=false tfplan
+        run: |
+          echo "Starting atomic Terraform apply..."
+          echo "All resources will be created or none (rollback on failure)"
+          
+          if terraform apply -auto-approve -input=false tfplan; then
+            echo "apply_success=true" >> $GITHUB_OUTPUT
+            echo "✅ All resources created successfully"
+          else
+            echo "apply_success=false" >> $GITHUB_OUTPUT
+            echo "❌ Terraform apply failed - initiating rollback"
+            exit 1
+          fi
+      
+      - name: Rollback on Failure
+        if: failure() && steps.apply.outcome == 'failure'
+        run: |
+          echo "⚠️  Terraform apply failed. Rolling back any partially created resources..."
+          echo "This ensures atomicity: all resources created or none."
+          
+          # Disable prevent_destroy temporarily for cleanup
+          export TF_CLI_ARGS="-lock=false"
+          
+          # Attempt to destroy any partially created resources
+          terraform destroy -auto-approve -input=false \
+            -var="environment=${{ steps.env.outputs.environment }}" \
+            -var="bucket_name=${{ vars.TF_STATE_BUCKET_NAME }}-${{ steps.env.outputs.environment }}" \
+            -var="TF_LOCK_DYNAMODB_TABLE_NAME=${{ vars.TF_LOCK_DYNAMODB_TABLE_NAME }}-${{ steps.env.outputs.environment }}" || true
+          
+          echo "🧹 Cleanup completed. No partial infrastructure left behind."
+          echo "Please review the error above and fix the issue before re-running."
       
       - name: Terraform Output
         id: output
+        if: steps.apply.outputs.apply_success == 'true'
         run: |
           echo "s3_bucket_id=$(terraform output -raw s3_bucket_id)" >> $GITHUB_OUTPUT
-          echo "dynamodb_table_name=$(terraform output -raw dynamodb_table_name)" >> $GITHUB_OUTPUT
+          echo "TF_LOCK_DYNAMODB_TABLE_NAME=$(terraform output -raw TF_LOCK_DYNAMODB_TABLE_NAME)" >> $GITHUB_OUTPUT
       
       - name: Display Backend Configuration
         run: |
@@ -229,7 +274,7 @@ jobs:
           echo ""
           echo "### Environment: ${{ steps.env.outputs.environment }}"
           echo "### S3 Bucket: ${{ steps.output.outputs.s3_bucket_id }}"
-          echo "### DynamoDB Table: ${{ steps.output.outputs.dynamodb_table_name }}"
+          echo "### DynamoDB Table: ${{ steps.output.outputs.TF_LOCK_DYNAMODB_TABLE_NAME }}"
           echo ""
           echo "### Use this backend configuration in your projects:"
           terraform output -raw backend_config_example

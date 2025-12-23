@@ -15,16 +15,16 @@ GitHub Variables allow you to:
 
 | Variable Name | Description | Default Value | Required |
 |--------------|-------------|---------------|----------|
-| `TERRAFORM_STATE_BUCKET_NAME` | Base S3 bucket name (environment suffix added automatically) | None | **Yes** |
-| `DYNAMODB_TABLE_NAME` | Base DynamoDB table name (environment suffix added automatically) | `terraform-state-locks` | No |
+| `TF_STATE_BUCKET_NAME` | Base S3 bucket name (environment suffix added automatically) | None | **Yes** |
+| `TF_LOCK_DYNAMODB_TABLE_NAME` | Base DynamoDB table name (environment suffix added automatically) | None | **Yes** |
 | `AWS_REGION` | AWS region for resources | `eu-west-1` | No |
 
 ## Naming Strategy
 
-- **S3 Bucket**: Provide base name via `TERRAFORM_STATE_BUCKET_NAME`, workflow adds `-${environment}` suffix
+- **S3 Bucket**: Provide base name via `TF_STATE_BUCKET_NAME`, workflow adds `-${environment}` suffix
   - Example: `victorgalantech-tfstate` → `victorgalantech-tfstate-dev`, `victorgalantech-tfstate-qa`, `victorgalantech-tfstate-pro`
-- **DynamoDB Table**: Auto-generated as `terraform-state-locks-${environment}` unless overridden
-  - If `DYNAMODB_TABLE_NAME` is set, it also gets `-${environment}` suffix added automatically
+- **DynamoDB Table**: Provide base name via `TF_LOCK_DYNAMODB_TABLE_NAME`, workflow adds `-${environment}` suffix
+  - Example: `terraform-state-locks` → `terraform-state-locks-dev`, `terraform-state-locks-qa`, `terraform-state-locks-pro`
 
 ## How to Configure GitHub Variables
 
@@ -41,7 +41,7 @@ Click **New repository variable** and add:
 
 #### Required: S3 Bucket Name (Base)
 
-- **Name**: `TERRAFORM_STATE_BUCKET_NAME`
+- **Name**: `TF_STATE_BUCKET_NAME`
 - **Value**: `victorgalantech-tfstate` (base name only, NO environment suffix)
 
 **Important**: 
@@ -49,14 +49,14 @@ Click **New repository variable** and add:
 - Provide the **base name only** - the workflow automatically adds `-dev`, `-qa`, or `-pro` based on the branch.
 - The base name must be globally unique (when combined with environment suffix).
 
-#### Optional: Custom DynamoDB Table Name (Base)
+#### Required: DynamoDB Table Name (Base)
 
-Only add this if you want to override the default `terraform-state-locks`:
+- **Name**: `TF_LOCK_DYNAMODB_TABLE_NAME`
+- **Value**: `terraform-state-locks` (base name only, NO environment suffix)
 
-- **Name**: `DYNAMODB_TABLE_NAME`
-- **Value**: `my-company-locks` (base name only, NO environment suffix)
-
-**Note**: The workflow will automatically append `-dev`, `-qa`, or `-pro` to this base name.
+**Important**:
+- This variable is **required**. The workflow will fail if not set.
+- Provide the **base name only** - the workflow automatically adds `-dev`, `-qa`, or `-pro` based on the branch.
 
 #### Optional: Different AWS Region
 
@@ -79,37 +79,33 @@ If you want **different values per environment** (dev/qa/pro):
 
 ## Example Configurations
 
-### Scenario 1: Repository-Level Variable (Recommended)
+### Scenario 1: Repository-Level Variables (Recommended)
 
 **Variables**:
 ```
-TERRAFORM_STATE_BUCKET_NAME=victorgalantech-tfstate
+TF_STATE_BUCKET_NAME=victorgalantech-tfstate
+TF_LOCK_DYNAMODB_TABLE_NAME=terraform-state-locks
 ```
 
-**Result**: Different bucket per environment:
-- dev: `victorgalantech-tfstate-dev`
-- qa: `victorgalantech-tfstate-qa`
-- pro: `victorgalantech-tfstate-pro`
-
-**DynamoDB Tables** (auto-generated):
-- dev: `terraform-state-locks-dev`
-- qa: `terraform-state-locks-qa`
-- pro: `terraform-state-locks-pro`
+**Result**: Different resources per environment:
+- dev: `victorgalantech-tfstate-dev` + `terraform-state-locks-dev`
+- qa: `victorgalantech-tfstate-qa` + `terraform-state-locks-qa`
+- pro: `victorgalantech-tfstate-pro` + `terraform-state-locks-pro`
 
 ✅ **Recommended**: Each environment gets its own isolated resources.
 
-### Scenario 2: Custom DynamoDB Table Name
+### Scenario 2: Custom Naming Convention
 
 **Variables**:
 ```
-TERRAFORM_STATE_BUCKET_NAME=victorgalantech-tfstate
-DYNAMODB_TABLE_NAME=my-company-locks
+TF_STATE_BUCKET_NAME=acme-corp-tfstate
+TF_LOCK_DYNAMODB_TABLE_NAME=acme-corp-locks
 ```
 
 **Result**:
-- dev bucket: `victorgalantech-tfstate-dev`, table: `my-company-locks-dev`
-- qa bucket: `victorgalantech-tfstate-qa`, table: `my-company-locks-qa`
-- pro bucket: `victorgalantech-tfstate-pro`, table: `my-company-locks-pro`
+- dev: `acme-corp-tfstate-dev` + `acme-corp-locks-dev`
+- qa: `acme-corp-tfstate-qa` + `acme-corp-locks-qa`
+- pro: `acme-corp-tfstate-pro` + `acme-corp-locks-pro`
 
 ### Scenario 3: Different Base Names per AWS Account (Advanced)
 
@@ -117,15 +113,17 @@ If using GitHub Environments with different AWS accounts:
 
 **Environment: dev** (AWS Account A)
 ```
-TERRAFORM_STATE_BUCKET_NAME=company-dev-tfstate
+TF_STATE_BUCKET_NAME=company-dev-tfstate
+TF_LOCK_DYNAMODB_TABLE_NAME=company-dev-locks
 ```
-Result: `company-dev-tfstate-dev`
+Result: `company-dev-tfstate-dev` + `company-dev-locks-dev`
 
 **Environment: pro** (AWS Account B)
 ```
-TERRAFORM_STATE_BUCKET_NAME=company-prod-tfstate
+TF_STATE_BUCKET_NAME=company-prod-tfstate
+TF_LOCK_DYNAMODB_TABLE_NAME=company-prod-locks
 ```
-Result: `company-prod-tfstate-pro`
+Result: `company-prod-tfstate-pro` + `company-prod-locks-pro`
 
 This allows different naming schemes per AWS account while maintaining the pattern.
 
@@ -182,9 +180,9 @@ To truly support different values per environment without manual switching:
 ### Step 2: Add Environment Variables
 
 For each environment, add variables:
-- In `dev` environment: `BUCKET_NAME=...-dev`, `DYNAMODB_TABLE_NAME=...-dev`
-- In `qa` environment: `BUCKET_NAME=...-qa`, `DYNAMODB_TABLE_NAME=...-qa`
-- In `pro` environment: `BUCKET_NAME=...-pro`, `DYNAMODB_TABLE_NAME=...-pro`
+- In `dev` environment: `BUCKET_NAME=...-dev`, `TF_LOCK_DYNAMODB_TABLE_NAME=...-dev`
+- In `qa` environment: `BUCKET_NAME=...-qa`, `TF_LOCK_DYNAMODB_TABLE_NAME=...-qa`
+- In `pro` environment: `BUCKET_NAME=...-pro`, `TF_LOCK_DYNAMODB_TABLE_NAME=...-pro`
 
 ### Step 3: Update Workflow (requires modification)
 

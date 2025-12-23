@@ -11,16 +11,17 @@ environment = "dev"
 aws_region = "eu-west-1"
 
 # S3 Bucket Name (REQUIRED)
-# For GitHub Actions: Set TERRAFORM_STATE_BUCKET_NAME to base name only (e.g., "victorgalantech-tfstate")
+# For GitHub Actions: Set TF_STATE_BUCKET_NAME to base name only (e.g., "victorgalantech-tfstate")
 #                     The workflow will automatically add environment suffix (-dev, -qa, -pro)
 # For local runs: Use full name with environment suffix
 # This must be globally unique across all AWS accounts
 bucket_name = "victorgalantech-tfstate-dev"
 
-# DynamoDB Table for State Locking (optional - will be auto-generated if not provided)
-# If not set, table name will be: terraform-state-locks-{environment}
-# Uncomment and customize if you want a specific name:
-# dynamodb_table_name = "my-custom-locks-table"
+# DynamoDB Table for State Locking (REQUIRED)
+# For GitHub Actions: Set TF_LOCK_DYNAMODB_TABLE_NAME to base name only (e.g., "terraform-state-locks")
+#                     The workflow will automatically add environment suffix (-dev, -qa, -pro)
+# For local runs: Use full name with environment suffix
+TF_LOCK_DYNAMODB_TABLE_NAME = "terraform-state-locks-dev"
 
 # Lifecycle Configuration
 noncurrent_version_expiration_days = 90
