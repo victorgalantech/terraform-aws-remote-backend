@@ -6,6 +6,12 @@
 
 Centralized Terraform state management infrastructure using AWS S3 and DynamoDB. This repository sets up a secure, versioned S3 bucket and DynamoDB table for storing and locking Terraform state files across multiple projects.
 
+## ⚠️ Prerequisites - Bootstrap Backend Required
+
+**Before first use**, you must create a minimal bootstrap backend to store this Terraform's own state. This solves the "bootstrapping paradox" where we can't use the bucket we're creating to store the state that creates it.
+
+👉 **See [SETUP_GUIDE.md](SETUP_GUIDE.md) for one-time setup instructions** (takes ~5 minutes)
+
 ## 📋 Table of Contents
 
 - [Features](#-features)
@@ -87,153 +93,255 @@ Creates per environment:
 
 ## 🏗️ Architecture
 
+### Per-Environment Backend Pattern
+
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    AWS Account                          │
-│                                                         │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │  S3 Bucket: template-lambda-tfstate-victor       │  │
-│  │  - Versioning: Enabled                           │  │
-│  │  - Encryption: AES256                            │  │
-│  │  - Public Access: Blocked                        │  │
-│  │  - Lifecycle: 90 days retention                  │  │
-│  └──────────────────────────────────────────────────┘  │
-│                         │                               │
-│                         │ State Files                   │
-│                         ▼                               │
-│  ┌──────────────────────────────────────────────────┐  │
-│  │  DynamoDB: terraform-state-locks-{env}           │  │
-│  │  - Hash Key: LockID                              │  │
-│  │  - Billing: Pay-per-request                      │  │
-│  └──────────────────────────────────────────────────┘  │
-│                         │                               │
-│                         │ Lock Management               │
-└─────────────────────────┼───────────────────────────────┘
-                          │
-                          ▼
-              ┌───────────────────────┐
-              │  Terraform Projects   │
-              │  - template-lambda    │
-              │  - other-project-1    │
-              │  - other-project-2    │
-              └───────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                         AWS Account                             │
+│                                                                 │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ 🔧 DEV Backend (stores THIS Terraform's state for dev)  │  │
+│  │                                                          │  │
+│  │  S3: victorgalantech-tfstate-dev                        │  │
+│  │  DynamoDB: terraform-state-locks                        │  │
+│  │  Key: backend-infrastructure/terraform.tfstate          │  │
+│  │                                                          │  │
+│  │  Used by: terraform init -backend-config=backend-dev.hcl│  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                              ↓                                  │
+│                    (THIS Terraform manages                      │
+│                     OTHER projects' backends)                   │
+│                              ↓                                  │
+│  ┌──────────────────────────────────────────────────────────┐  │
+│  │ 📦 Application Backends for OTHER projects (dev)        │  │
+│  │                                                          │  │
+│  │  Same bucket/table used for:                            │  │
+│  │  - Other projects' state files                          │  │
+│  │  - Shared across all dev projects                       │  │
+│  │                                                          │  │
+│  │  Other projects use:                                    │  │
+│  │    bucket = "victorgalantech-tfstate-dev"               │  │
+│  │    key    = "project-name/terraform.tfstate"            │  │
+│  └──────────────────────────────────────────────────────────┘  │
+│                                                                 │
+│  (Same pattern repeated for QA and PRO environments)            │
+└─────────────────────────────────────────────────────────────────┘
 ```
+
+**Per-Environment Isolation:**
+- Each environment (dev/qa/pro) has its own S3 bucket and DynamoDB table
+- This Terraform's state is stored in the same bucket it manages
+- Complete isolation between environments
+- Each environment is bootstrapped independently
 
 ## 📦 Prerequisites
 
-- **Terraform** >= 1.6.0
-- **AWS CLI** configured with appropriate credentials
-- **AWS Account** with permissions to create:
-  - S3 buckets
-  - DynamoDB tables
-  - IAM policies (for bucket policies)
+### Required
+- AWS account with appropriate permissions
+- Terraform 1.6 or later
+- AWS CLI configured
+- **Per-environment backends created** - See [SETUP_GUIDE.md](SETUP_GUIDE.md) (~10 minutes per environment)
+
+### Optional (for CI/CD)
+- GitHub account
+- GitHub Actions enabled
+- AWS credentials configured as GitHub Secrets
 
 ## 🚀 Quick Start
 
-### Option A: Using Automation Scripts (Recommended for Local Development)
+### Overview: Local Deployment → Remote State → GitHub Actions
 
-The easiest way to run Terraform locally for **dev** and **qa** environments.
+This guide sets up **remote state backends** for all environments (dev, qa, pro) using the **Backend Migration** approach:
 
-**Prerequisites**: Create `terraform/dev.tfvars` and `terraform/qa.tfvars` with your bucket name:
-```hcl
-environment = "dev"  # or "qa"
-bucket_name = "victorgalantech-tfstate-dev"  # Full name with environment suffix
-```
+1. **Generate config files** for each environment
+2. **Deploy locally** (creates S3 + DynamoDB infrastructure)
+3. **Migrate state** from local to remote S3 backend
+4. **Configure GitHub Actions** to use the remote backends
+5. **Push to GitHub** - CI/CD automatically uses remote state ✅
 
-#### Windows (PowerShell)
+---
 
-```powershell
-# Deploy DEV environment
-.\scripts\local\terraform\apply-dev.ps1
+### Step 1: Generate Configuration Files
 
-# Deploy QA environment
-.\scripts\local\terraform\apply-qa.ps1
-
-# Destroy DEV environment
-.\scripts\local\terraform\destroy-dev.ps1
-
-# Destroy QA environment
-.\scripts\local\terraform\destroy-qa.ps1
-```
-
-#### Linux/macOS (Bash)
+Generate `tfvars` files for all three environments:
 
 ```bash
-# Make scripts executable (first time only)
-chmod +x scripts/local/terraform/*.sh
+# Linux/macOS
+./scripts/setup-environment.sh dev
+./scripts/setup-environment.sh qa
+./scripts/setup-environment.sh pro
 
-# Deploy DEV environment
-./scripts/local/terraform/apply-dev.sh
-
-# Deploy QA environment
-./scripts/local/terraform/apply-qa.sh
-
-# Destroy DEV environment
-./scripts/local/terraform/destroy-dev.sh
-
-# Destroy QA environment
-./scripts/local/terraform/destroy-qa.sh
+# Windows PowerShell
+.\scripts\setup-environment.ps1 dev
+.\scripts\setup-environment.ps1 qa
+.\scripts\setup-environment.ps1 pro
 ```
 
-**Note:** Production environment should only be deployed via CI/CD pipeline for safety.
+**Result:** Creates `terraform/dev.tfvars`, `terraform/qa.tfvars`, `terraform/pro.tfvars`
 
-### Option B: Manual Terraform Commands
+---
 
-### 1. Clone the Repository
+### Step 2: Deploy Backend Infrastructure Locally (Per Environment)
 
-```bash
-git clone <repository-url>
-cd terraform-states-s3-bucket
-```
+**Repeat this process for each environment (dev, qa, pro):**
 
-### 2. Navigate to Terraform Directory
+#### 2.1 Initial Deployment (Local State)
 
 ```bash
 cd terraform
-```
 
-### 3. Configure Variables (Required)
-
-Copy the example file and customize with your **globally unique** bucket name:
-
-```bash
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars and set bucket_name to a unique value
-```
-
-**Important**: `bucket_name` is required. The DynamoDB table name will be auto-generated as `terraform-state-locks-{environment}`.
-
-### 4. Initialize Terraform
-
-```bash
+# Initialize Terraform with LOCAL state (backend block is commented out)
 terraform init
+
+# Deploy backend infrastructure (S3 bucket + DynamoDB table)
+terraform apply -var-file=dev.tfvars
 ```
 
-### 5. Review the Plan
+✅ **Created:** 
+- S3 bucket: `victorgalantech-tfstate-dev`
+- DynamoDB table: `terraform-state-locks`
+- State stored: **locally** in `terraform.tfstate`
 
-Specify the environment (dev, qa, or pro):
+#### 2.2 Migrate State to Remote Backend
 
 ```bash
-terraform plan -var="environment=dev" -var="bucket_name=your-unique-bucket-dev"
-# Or use tfvars file:
-terraform plan -var-file="dev.tfvars"
+# 1. Edit terraform/backend.tf - UNCOMMENT the backend block
+#    (lines 47-51 in backend.tf)
+
+# 2. Re-initialize with backend configuration
+terraform init -backend-config=backend-dev.hcl -migrate-state
+
+# Terraform will ask: "Do you want to copy existing state to the new backend?"
+# Answer: yes
 ```
 
-### 6. Apply the Configuration
+✅ **Result:** State now stored in S3 bucket (`terraform-backend/terraform.tfstate`)
+
+#### 2.3 Verify Remote State
 
 ```bash
-terraform apply -var="environment=dev" -var="bucket_name=your-unique-bucket-dev"
-# Or use tfvars file:
-terraform apply -var-file="dev.tfvars"
+# Check that state is in S3
+aws s3 ls s3://victorgalantech-tfstate-dev/terraform-backend/
+
+# Run a plan to verify remote backend works
+terraform plan -var-file=dev.tfvars
 ```
 
-**Tip:** The CI/CD pipeline automatically sets the environment based on your branch!
-
-### 7. Save the Outputs
+#### 2.4 Repeat for QA and PRO
 
 ```bash
-terraform output backend_config_example
+# QA environment
+terraform apply -var-file=qa.tfvars
+terraform init -backend-config=backend-qa.hcl -migrate-state
+
+# PRO environment  
+terraform apply -var-file=pro.tfvars
+terraform init -backend-config=backend-pro.hcl -migrate-state
 ```
+
+**📖 Detailed walkthrough:** See [SETUP_GUIDE.md](SETUP_GUIDE.md)
+
+---
+
+### Step 3: Configure GitHub Actions
+
+#### 3.1 Configure AWS Credentials (Secrets)
+
+Go to: **Repository → Settings → Secrets and variables → Actions → Secrets**
+
+Click **New repository secret** and add:
+
+| Secret Name | Value | Description |
+|------------|-------|-------------|
+| `AWS_ACCESS_KEY_ID` | Your AWS access key | AWS credentials for GitHub Actions |
+| `AWS_SECRET_ACCESS_KEY` | Your AWS secret key | AWS credentials for GitHub Actions |
+
+#### 3.2 Configure Backend Names (Variables)
+
+Go to: **Repository → Settings → Secrets and variables → Actions → Variables**
+
+Click **New repository variable** and add:
+
+| Variable Name | Value | Required | Notes |
+|--------------|-------|----------|-------|
+| `TF_STATE_BUCKET_NAME` | `victorgalantech-tfstate` | **Yes** | Base name only (no environment suffix) |
+| `TF_LOCK_DYNAMODB_TABLE_NAME` | `terraform-state-locks` | **Yes** | Shared table name (no suffix) |
+
+**Important Notes:**
+- ⚠️ **Do NOT include environment suffix** - The workflow automatically adds `-dev`, `-qa`, or `-pro` based on branch
+- ✅ **Must match what you created locally** in Step 2
+- 🌍 **Bucket name must be globally unique** across all AWS accounts
+
+**Example:** 
+- Variable: `TF_STATE_BUCKET_NAME = victorgalantech-tfstate`
+- Result:
+  - dev branch → `victorgalantech-tfstate-dev`
+  - qa branch → `victorgalantech-tfstate-qa`
+  - main branch → `victorgalantech-tfstate-pro`
+
+**Troubleshooting:**
+- **Variables not working?** Ensure they're at repository level, not environment level
+- **Wrong region?** Optionally add `AWS_REGION` variable (default: `eu-west-1`)
+- **Name mismatch?** Variable values must match the backends you created in Step 2
+
+---
+
+### Step 4: Push and Deploy via GitHub Actions
+
+```bash
+# Commit all changes
+git add .
+git commit -m "Configure remote state backends"
+
+# Push to trigger CI/CD
+git push origin main        # Deploys to PRO (if configured)
+git push origin develop     # Deploys to DEV
+git push origin qa          # Deploys to QA
+```
+
+✅ **GitHub Actions will:**
+1. Detect the environment from branch
+2. Initialize Terraform with remote backend (S3)
+3. Run `terraform plan` and `terraform apply`
+4. Store state in the remote backend you created
+
+---
+
+### ✅ You're Done!
+
+**What you have now:**
+- ✅ Remote state backends for dev/qa/pro in S3
+- ✅ State locking via DynamoDB
+- ✅ GitHub Actions configured for CI/CD
+- ✅ All future deployments use remote state automatically
+
+**Next Steps:**
+- Use these backends in other Terraform projects (see [Usage in Other Projects](#-usage-in-other-projects))
+- Monitor state changes in S3
+- Review GitHub Actions runs
+
+---
+
+## 🔄 Alternative: Using Convenience Scripts
+
+If you prefer scripts over manual commands:
+
+```bash
+# Make scripts executable (Linux/macOS only, first time)
+chmod +x scripts/*.sh
+
+# Linux/macOS
+./scripts/apply-dev.sh      # Deploy dev
+./scripts/apply-qa.sh       # Deploy qa
+./scripts/destroy-dev.sh    # Destroy dev
+
+# Windows PowerShell
+.\\scripts\\apply-dev.ps1
+.\\scripts\\apply-qa.ps1
+.\\scripts\\destroy-dev.ps1
+```
+
+**Note:** These scripts assume backend is already configured. Use manual migration workflow first.
 
 ## 📝 Usage in Other Projects
 
