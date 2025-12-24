@@ -34,12 +34,12 @@
 # - Always use targeted destroys: terraform destroy -target=...
 # - Never run "terraform destroy" on the entire configuration
 #
-# See BACKEND_MIGRATION.md for detailed walkthrough.
+# See SETUP_GUIDE.md for detailed walkthrough.
 
 terraform {
   # UNCOMMENT THIS BLOCK AFTER FIRST DEPLOYMENT
-  # backend "s3" {
-  #   # Configuration provided via backend-{env}.hcl files
-  #   # Values: bucket, key, region, dynamodb_table, encrypt
-  # }
+  backend "s3" {
+    # Configuration provided via backend-{env}.hcl files
+    # Values: bucket, key, region, dynamodb_table, encrypt
+  }
 }

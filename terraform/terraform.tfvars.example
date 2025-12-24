@@ -18,10 +18,9 @@ aws_region = "eu-west-1"
 bucket_name = "victorgalantech-tfstate-dev"
 
 # DynamoDB Table for State Locking (REQUIRED)
-# For GitHub Actions: Set TF_LOCK_DYNAMODB_TABLE_NAME to base name only (e.g., "terraform-state-locks")
-#                     The workflow will automatically add environment suffix (-dev, -qa, -pro)
-# For local runs: Use full name with environment suffix
-TF_LOCK_DYNAMODB_TABLE_NAME = "terraform-state-locks-dev"
+# This table is SHARED across all environments (dev, qa, pro)
+# No environment suffix needed - all environments use the same table
+TF_LOCK_DYNAMODB_TABLE_NAME = "terraform-state-locks"
 
 # Lifecycle Configuration
 noncurrent_version_expiration_days = 90
