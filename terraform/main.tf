@@ -127,17 +127,6 @@ resource "aws_dynamodb_table" "terraform_locks" {
     prevent_destroy = true
   }
 
-  # Ensure all S3 resources are created successfully before creating DynamoDB
-  # This prevents partial deployment if S3 bucket creation fails
-  depends_on = [
-    aws_s3_bucket.terraform_state,
-    aws_s3_bucket_versioning.versioning,
-    aws_s3_bucket_server_side_encryption_configuration.default,
-    aws_s3_bucket_public_access_block.block_public_access,
-    aws_s3_bucket_lifecycle_configuration.state_lifecycle,
-    aws_s3_bucket_policy.terraform_state_policy
-  ]
-
   tags = merge(
     local.common_tags,
     {

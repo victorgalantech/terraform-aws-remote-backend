@@ -4,8 +4,9 @@ name: Terraform State Bucket CI/CD
 #
 # ATOMICITY GUARANTEE:
 # - All resources are created successfully OR none are created (rollback on failure)
-# - DynamoDB table depends on all S3 resources (prevents partial deployment)
+# - S3 and DynamoDB resources are created in parallel for faster deployment
 # - Automatic rollback destroys any partially created resources if apply fails
+# - Workflow-level rollback ensures clean state regardless of which resource fails
 #
 # Required GitHub Variables (configure in Settings > Secrets and variables > Actions > Variables):
 # - TF_STATE_BUCKET_NAME: Base S3 bucket name (environment suffix added automatically)
