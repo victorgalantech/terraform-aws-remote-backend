@@ -235,7 +235,10 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
       
       - name: Terraform Init
-        run: terraform init
+        run: |
+          ENVIRONMENT="${{ steps.env.outputs.environment }}"
+          echo "Initializing Terraform with ${ENVIRONMENT} backend..."
+          terraform init -backend-config=backend-${ENVIRONMENT}.hcl
       
       - name: Download Terraform Plan
         uses: actions/download-artifact@v4
