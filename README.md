@@ -264,20 +264,24 @@ Click **New repository variable** and add:
 
 | Variable Name | Value | Required | Notes |
 |--------------|-------|----------|-------|
-| `TF_STATE_BUCKET_NAME` | `victorgalantech-tfstate` | **Yes** | Base name only (no environment suffix) |
-| `TF_LOCK_DYNAMODB_TABLE_NAME` | `terraform-state-locks` | **Yes** | Shared table name (no suffix) |
+| `TF_STATE_BUCKET_NAME` | `victorgalantech-tfstate` | **Yes** | Base name only (suffix added per env) |
+| `TF_LOCK_DYNAMODB_TABLE_NAME` | `terraform-state-locks` | **Yes** | Same name in all AWS accounts |
 
 **Important Notes:**
-- ⚠️ **Do NOT include environment suffix** - The workflow automatically adds `-dev`, `-qa`, or `-pro` based on branch
+- 🪣 **S3 Bucket**: Suffix is added automatically (`-dev`, `-qa`, `-pro`)
+- 🔒 **DynamoDB Table**: Same name used in all AWS accounts (no suffix)
 - ✅ **Must match what you created locally** in Step 2
 - 🌍 **Bucket name must be globally unique** across all AWS accounts
+- 🏢 **Multi-account setup**: Each environment uses separate AWS account
 
 **Example:** 
-- Variable: `TF_STATE_BUCKET_NAME = victorgalantech-tfstate`
-- Result:
-  - dev branch → `victorgalantech-tfstate-dev`
-  - qa branch → `victorgalantech-tfstate-qa`
-  - main branch → `victorgalantech-tfstate-pro`
+- Variables:
+  - `TF_STATE_BUCKET_NAME = victorgalantech-tfstate`
+  - `TF_LOCK_DYNAMODB_TABLE_NAME = terraform-state-locks`
+- Result per environment:
+  - **dev** (AWS Account A): `victorgalantech-tfstate-dev` + `terraform-state-locks`
+  - **qa** (AWS Account B): `victorgalantech-tfstate-qa` + `terraform-state-locks`
+  - **pro** (AWS Account C): `victorgalantech-tfstate-pro` + `terraform-state-locks`
 
 **Troubleshooting:**
 - **Variables not working?** Ensure they're at repository level, not environment level

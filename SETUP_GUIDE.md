@@ -60,7 +60,7 @@ terraform apply -var-file=dev.tfvars
 
 **What gets created:**
 - ✅ S3 bucket: `victorgalantech-tfstate-dev`
-- ✅ DynamoDB table: `terraform-state-locks` (shared across all environments)
+- ✅ DynamoDB table: `terraform-state-locks` (same name in each AWS account)
 - ✅ State stored: **locally** in `terraform.tfstate`
 
 **Verify:**
@@ -259,45 +259,42 @@ aws dynamodb delete-table --table-name terraform-state-locks
 ## 🔧 Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         AWS Account                             │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ DEV Environment Backend                                  │  │
-│  │                                                          │  │
-│  │  • S3: victorgalantech-tfstate-dev                      │  │
-│  │  • DynamoDB: terraform-state-locks (shared)             │  │
-│  │                                                          │  │
-│  │  Stores:                                                 │  │
-│  │  1. THIS Terraform's state (backend-infrastructure/)    │  │
-│  │  2. OTHER dev projects' state (project-name/)           │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ QA Environment Backend                                   │  │
-│  │                                                          │  │
-│  │  • S3: victorgalantech-tfstate-qa                       │  │
-│  │  • DynamoDB: terraform-state-locks (shared)             │  │
-│  │                                                          │  │
-│  │  Stores: Same pattern as DEV                            │  │
-│  └──────────────────────────────────────────────────────────┘  │
-│                                                                 │
-│  ┌──────────────────────────────────────────────────────────┐  │
-│  │ PRO Environment Backend                                  │  │
-│  │                                                          │  │
-│  │  • S3: victorgalantech-tfstate-pro                      │  │
-│  │  • DynamoDB: terraform-state-locks (shared)             │  │
-│  │                                                          │  │
-│  │  Stores: Same pattern as DEV                            │  │
-│  └──────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                   AWS Account A (DEV)                        │
+│                                                              │
+│  • S3: victorgalantech-tfstate-dev                          │
+│  • DynamoDB: terraform-state-locks                          │
+│                                                              │
+│  Stores:                                                     │
+│  1. THIS Terraform's state (backend-infrastructure/)        │
+│  2. OTHER dev projects' state (project-name/)               │
+└──────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────┐
+│                   AWS Account B (QA)                         │
+│                                                              │
+│  • S3: victorgalantech-tfstate-qa                           │
+│  • DynamoDB: terraform-state-locks                          │
+│                                                              │
+│  Stores: Same pattern as DEV                                │
+└──────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────┐
+│                   AWS Account C (PRO)                        │
+│                                                              │
+│  • S3: victorgalantech-tfstate-pro                          │
+│  • DynamoDB: terraform-state-locks                          │
+│                                                              │
+│  Stores: Same pattern as DEV                                │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 **Key Points:**
-- **3 S3 buckets**: One per environment (dev, qa, pro)
-- **1 DynamoDB table**: Shared across all environments (terraform-state-locks)
-- Complete environment isolation for state files
-- Each environment's Terraform state stored in its own bucket
+- **Multi-Account Architecture**: Each environment uses a separate AWS account
+- **3 S3 buckets**: One per environment (dev, qa, pro) with environment suffix
+- **3 DynamoDB tables**: Same name `terraform-state-locks` in each AWS account (no suffix needed)
+- Complete environment isolation at the AWS account level
+- Each environment's Terraform state stored in its own bucket in its own account
 
 ---
 
@@ -343,10 +340,10 @@ aws s3api put-public-access-block \
 # Repeat for QA and PRO with different bucket names
 ```
 
-### Create DynamoDB Table (Once - Shared)
+### Create DynamoDB Table (Per AWS Account)
 
 ```bash
-# Create the lock table (shared across all environments)
+# Create the lock table (same name in each AWS account)
 aws dynamodb create-table \
   --table-name terraform-state-locks \
   --attribute-definitions AttributeName=LockID,AttributeType=S \
@@ -517,8 +514,8 @@ terraform state list
 
 ## ❓ FAQ
 
-**Q: Why share one DynamoDB table across all environments?**  
-A: State locking uses unique keys per state file, so one table can handle all environments safely. This reduces costs and complexity.
+**Q: Why use the same DynamoDB table name across AWS accounts?**  
+A: With multi-account architecture, each AWS account has its own `terraform-state-locks` table. Using the same name simplifies configuration and scripts. Since each table is in a separate AWS account, there's no conflict.
 
 **Q: Can I use different bucket names?**  
 A: Yes! Update the base name in `scripts/setup-environment.sh` or `setup-environment.ps1` before generating tfvars.

@@ -22,10 +22,8 @@ name: Terraform State Bucket CI/CD
 #     - qa: victorgalantech-tfstate-qa
 #     - pro: victorgalantech-tfstate-pro
 # - TF_LOCK_DYNAMODB_TABLE_NAME=terraform-state-locks
-#   Results in:
-#     - dev: terraform-state-locks-dev
-#     - qa: terraform-state-locks-qa
-#     - pro: terraform-state-locks-pro
+#   Same table name used in all AWS accounts (dev account, qa account, pro account)
+#   Each account has its own table with the same name
 
 on:
   push:
@@ -129,11 +127,11 @@ jobs:
             exit 1
           fi
           
-          # Required: Base DynamoDB table name from GitHub Variables
+          # Required: DynamoDB table name from GitHub Variables
           if [ -z "${{ vars.TF_LOCK_DYNAMODB_TABLE_NAME }}" ]; then
             echo "ERROR: TF_LOCK_DYNAMODB_TABLE_NAME variable is required but not set in GitHub Variables"
             echo "Go to Settings > Secrets and variables > Actions > Variables and add TF_LOCK_DYNAMODB_TABLE_NAME"
-            echo "Example: terraform-state-locks (environment suffix will be added automatically)"
+            echo "Example: terraform-state-locks (same name used across all AWS accounts)"
             exit 1
           fi
           
@@ -142,9 +140,9 @@ jobs:
           echo "Using bucket: ${BUCKET_NAME}"
           PLAN_ARGS="${PLAN_ARGS} -var=bucket_name=${BUCKET_NAME}"
           
-          # Construct full DynamoDB table name with environment suffix
-          TABLE_NAME="${{ vars.TF_LOCK_DYNAMODB_TABLE_NAME }}-${ENVIRONMENT}"
-          echo "Using DynamoDB table: ${TABLE_NAME}"
+          # DynamoDB table name (same across all AWS accounts)
+          TABLE_NAME="${{ vars.TF_LOCK_DYNAMODB_TABLE_NAME }}"
+          echo "Using DynamoDB table: ${TABLE_NAME} (in ${ENVIRONMENT} AWS account)"
           PLAN_ARGS="${PLAN_ARGS} -var=TF_LOCK_DYNAMODB_TABLE_NAME=${TABLE_NAME}"
           
           terraform plan -no-color -input=false ${PLAN_ARGS} -out=tfplan
@@ -273,7 +271,7 @@ jobs:
           terraform destroy -auto-approve -input=false \
             -var="environment=${{ steps.env.outputs.environment }}" \
             -var="bucket_name=${{ vars.TF_STATE_BUCKET_NAME }}-${{ steps.env.outputs.environment }}" \
-            -var="TF_LOCK_DYNAMODB_TABLE_NAME=${{ vars.TF_LOCK_DYNAMODB_TABLE_NAME }}-${{ steps.env.outputs.environment }}" || true
+            -var="TF_LOCK_DYNAMODB_TABLE_NAME=${{ vars.TF_LOCK_DYNAMODB_TABLE_NAME }}" || true
           
           echo "🧹 Cleanup completed. No partial infrastructure left behind."
           echo "Please review the error above and fix the issue before re-running."
